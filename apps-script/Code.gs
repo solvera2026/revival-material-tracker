@@ -3,7 +3,8 @@
  * Paste this file into Extensions > Apps Script in the "Revival Material Tracker" Google Sheet.
  *
  * Setup (once):
- *   1. Project Settings > Script properties: add REVIVAL_API_TOKEN (any long random text; the same value goes in Netlify as APPS_SCRIPT_TOKEN).
+ *   1. Run createApiToken() and copy the token it shows in the Execution log (it also saves it as the REVIVAL_API_TOKEN
+ *      script property). Paste it into Netlify as APPS_SCRIPT_TOKEN.
  *   2. Run setupWorkbook() once and approve the permissions.
  *   3. Deploy > New deployment > Web app: Execute as "Me", Who has access "Anyone". Copy the /exec URL into Netlify as APPS_SCRIPT_URL.
  */
@@ -103,6 +104,14 @@ function seedInventoryRows_() {
 /** Same as the app: "Mt. Everest" -> "MT_EVEREST" */
 function slug_(text) {
   return String(text).toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
+/** Makes a long random token, saves it as the REVIVAL_API_TOKEN script property, and shows it in the Execution log to copy into Netlify. */
+function createApiToken() {
+  const token = "rev_" + Utilities.getUuid().replace(/-/g, "") + Utilities.getUuid().replace(/-/g, "");
+  PropertiesService.getScriptProperties().setProperty(CONFIG.apiTokenProperty, token);
+  Logger.log("Copy this into Netlify as APPS_SCRIPT_TOKEN: " + token);
+  return token;
 }
 
 function setupWorkbook() {
