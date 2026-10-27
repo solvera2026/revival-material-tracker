@@ -32,6 +32,9 @@ const SHEETS = {
 const SCHEDULE_SHEET_ID = "1I_P4Ypy9L5Wqp6TGYf8VgoqAExRhH5ftH2pVn1q_jJM";
 const SCHEDULE_LOOKBACK_DAYS = 30;   // jobs that started up to 30 days ago (multi-day and two-phase jobs)
 const SCHEDULE_LOOKAHEAD_DAYS = 7;   // and jobs starting in the next week (loading the night before)
+// 2026 Flake & Chemical Sheet DSM: its "Upcoming Jobs" tab (rebuilt every morning from QuickBooks + the schedule) gives
+// each job's sold sq ft, flake (Torginol name) and base coat, so the app can fill them in.
+const FLAKE_SHEET_ID = "1BLz7pDUtBW5Hfta8Z-MS7-jQ1JG5I0o3c9cmVvTMKZU";
 
 const SHEET_RENAMES = [];
 
@@ -79,6 +82,8 @@ const LOW_STOCK_HEADERS = [
 // Material IDs must match the app (src/App.jsx). On Hand starts at 0: do a shop count and enter it.
 const CLASSIC_COLORS = ["Antler", "Basalt", "Cabin Fever", "Chestnut", "Coyote", "Creekbed", "Domino", "Granite", "Gravel", "Keystone", "Lanai Gray", "Mt. Everest", "Nightfall", "Orbit", "Outback", "Shoreline", "Silver Creek", "Stoney Creek", "Tidal Wave", "Wombat"];
 const NATURAL_STONE_COLORS = ["Anchorage", "Armadillo", "Claystone", "Husky", "Shale", "Slate", "Turquoise"];
+// Torginol (manufacturer) names used for ordering; the material IDs keep the old names so history doesn't change.
+const TORGINOL_NAMES = { "Mt. Everest": "Mount Everest Match", "Silver Creek": "Silvercreek Match", "Stoney Creek": "Stony Creek" };
 
 function seedInventoryRows_() {
   const rows = [];
@@ -94,7 +99,7 @@ function seedInventoryRows_() {
   rows.push(["HWU_TOP", "High-Wear Urethane Topcoat", "Topcoat", "gal", 1, 0, 2, 4, "Simiron", "", "1-gal kits; 600 SF/gal."]);
   rows.push(["EPS_971", "971 EPS Epoxy Siloxane", "Clear Coat", "gal", 1, 0, 2, 4, "Simiron", "", "1-gal kits; 300 SF/gal. Grind & clear."]);
   rows.push(["QUARTZ", "Quartz", "Quartz", "box", 0.25, 0, 2, 5, "Sherwin-Williams", "", "50 SF/box."]);
-  CLASSIC_COLORS.forEach(c => rows.push(["FLAKE_CLASSIC_" + slug_(c), c + " Flake", "Flake", "box", 0.25, 0, 4, 10, "Sherwin-Williams", "", "Classic 1/4\" flake; 250 SF/box."]));
+  CLASSIC_COLORS.forEach(c => rows.push(["FLAKE_CLASSIC_" + slug_(c), (TORGINOL_NAMES[c] || c) + " Flake", "Flake", "box", 0.25, 0, 4, 10, "Sherwin-Williams", "", "Classic 1/4\" flake; 250 SF/box."]));
   rows.push(["FLAKE_CLASSIC_OTHER", "Other Flake", "Flake", "box", 0.25, 0, "", "", "", "", "Color written in the loadout notes."]);
   NATURAL_STONE_COLORS.forEach(c => rows.push(["FLAKE_NATURAL_STONE_" + slug_(c), c + " Natural Stone Flake", "Flake", "box", 0.25, 0, 2, 5, "Sherwin-Williams", "", "Natural stone flake; 250 SF/box."]));
   rows.push(["FLAKE_NATURAL_STONE_OTHER", "Other Natural Stone Flake", "Flake", "box", 0.25, 0, "", "", "", "", "Color written in the loadout notes."]);
@@ -292,6 +297,7 @@ function listScheduledJobs_() {
     if (!id || String(r[idx["Stage"]] || "") !== "Project Scheduled") return;
     latest[id] = r;   // rows are appended in order, so the last one wins
   });
+  const sold = soldJobDetails_();
   return Object.keys(latest).map(id => {
     const r = latest[id];
     const start = toDate_(r[idx["Start Date"]]);
@@ -305,9 +311,34 @@ function listScheduledJobs_() {
     .sort((a, b) => a.start - b.start)
     .map(j => {
       const dates = formatShort_(j.start) + (j.end && formatShort_(j.end) !== formatShort_(j.start) ? " - " + formatShort_(j.end) : "");
+      const d = sold[normCustomer_(j.customer)] || {};
       return { projectId: j.projectId, customer: j.customer, crew: j.crew, crewLead: j.crewLead, dates: dates,
-        label: j.customer + " - " + dates };
+        label: j.customer + " - " + dates, soldSquareFeet: d.sqft || "", flakeColor: d.flake || "", baseCoat: d.base || "" };
     });
+}
+
+function normCustomer_(name) {
+  return String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/** customer -> { sqft, flake, base } from the Flake & Chemical sheet's Upcoming Jobs tab. Empty if it can't be read. */
+function soldJobDetails_() {
+  const out = {};
+  try {
+    const sheet = SpreadsheetApp.openById(FLAKE_SHEET_ID).getSheetByName("Upcoming Jobs");
+    if (!sheet || sheet.getLastRow() < 3) return out;
+    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 9).getValues();
+    const idx = headerIndex_(values[0]);
+    values.slice(1).forEach(r => {
+      const key = normCustomer_(r[idx["Customer"]]);
+      if (!key) return;
+      const flake = String(r[idx["Flake (order name)"]] || "").trim();
+      out[key] = { sqft: Number(r[idx["Sq ft"]]) || "", flake: /^\?/.test(flake) ? "" : flake, base: String(r[idx["Base coat"]] || "").trim() };
+    });
+  } catch (err) {
+    console.error("Upcoming Jobs: " + err.message);
+  }
+  return out;
 }
 
 function formatShort_(date) {

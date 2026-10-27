@@ -38,6 +38,19 @@ const FLAKE_TYPES = [
 // Colors from the Revival "2026 Flake & Chemical Sheet DSM" (On Hand - Flakes)
 const CLASSIC_COLORS = ["Antler", "Basalt", "Cabin Fever", "Chestnut", "Coyote", "Creekbed", "Domino", "Granite", "Gravel", "Keystone", "Lanai Gray", "Mt. Everest", "Nightfall", "Orbit", "Outback", "Shoreline", "Silver Creek", "Stoney Creek", "Tidal Wave", "Wombat"];
 const NATURAL_STONE_COLORS = ["Anchorage", "Armadillo", "Claystone", "Husky", "Shale", "Slate", "Turquoise"];
+// Torginol (manufacturer) names, for ordering. The key stays the material ID so inventory history doesn't change.
+const TORGINOL_NAMES = { "Mt. Everest": "Mount Everest Match", "Silver Creek": "Silvercreek Match", "Stoney Creek": "Stony Creek" };
+const colorLabel = (c) => TORGINOL_NAMES[c] || c;
+/** Finds the app color for a name from the forecast ("Mount Everest Match", "Stony Creek", "Shale"). */
+function findFlakeColor(name) {
+  const n = String(name || "").trim().toLowerCase();
+  if (!n) return null;
+  for (const [typeId, list] of [["CLASSIC", CLASSIC_COLORS], ["NATURAL_STONE", NATURAL_STONE_COLORS]]) {
+    const hit = list.find((c) => c.toLowerCase() === n || colorLabel(c).toLowerCase() === n);
+    if (hit) return { typeId, color: hit };
+  }
+  return null;
+}
 const OTHER_COLOR = "Other (write it in the notes)";
 
 const FLAKE_SAFETY_BOXES = 0.25;
@@ -124,7 +137,7 @@ function buildMaterialLines(system, opts, squareFeet) {
       const colorName = type.hasColor ? (opts.flakeColor || flakeColorsFor(type.id)[0]) : "";
       const isOther = colorName === OTHER_COLOR;
       const materialId = type.hasColor ? `FLAKE_${type.id}_${isOther ? "OTHER" : slug(colorName)}` : "QUARTZ";
-      const materialName = type.hasColor ? `${isOther ? "Other" : colorName} ${type.id === "NATURAL_STONE" ? "Natural Stone Flake" : "Flake"}` : "Quartz";
+      const materialName = type.hasColor ? `${isOther ? "Other" : colorLabel(colorName)} ${type.id === "NATURAL_STONE" ? "Natural Stone Flake" : "Flake"}` : "Quartz";
       const calculated = sf / type.coverage;
       const expected = roundUpTo(calculated, 0.25);
       lines.push({
@@ -374,6 +387,13 @@ export default function App() {
     if (match) {
       setCustomerName(match.customer);
       if (match.crewLead && roster.includes(match.crewLead)) setCrewLead(match.crewLead);
+      // sold sq ft, flake and base coat from the work order / QuickBooks (via the Flake & Chemical sheet forecast).
+      // Under 50 sq ft is a placeholder (minimum-price jobs), so the crew enters it.
+      if (Number(match.soldSquareFeet) >= 50) setSquareFeet(String(Math.round(Number(match.soldSquareFeet))));
+      const fc = findFlakeColor(match.flakeColor);
+      if (fc) { setFlakeTypeId(fc.typeId); setFlakeColor(fc.color); }
+      const base = BASE_COLORS.find((b) => b.label.toLowerCase() === String(match.baseCoat || "").toLowerCase());
+      if (base) setBaseColorId(base.id);
     }
   }
 
@@ -595,7 +615,7 @@ export default function App() {
                   </SelectField>
                   {flakeType.hasColor && (
                     <SelectField label="Flake color" value={flakeColor} onChange={setFlakeColor}>
-                      {[...flakeColorsFor(flakeTypeId), OTHER_COLOR].map((c) => <option key={c} value={c}>{c}</option>)}
+                      {[...flakeColorsFor(flakeTypeId), OTHER_COLOR].map((c) => <option key={c} value={c}>{colorLabel(c)}</option>)}
                     </SelectField>
                   )}
                 </>
@@ -604,7 +624,7 @@ export default function App() {
               <div className="field">
                 <Label>Square footage *</Label>
                 <input type="number" inputMode="numeric" min="1" className={`sfInput ${sf > 0 ? "hasValue" : ""}`} placeholder="0" value={squareFeet} onChange={(event) => setSquareFeet(event.target.value)} />
-                <div className="sfUnit">Square feet (from the work order)</div>
+                <div className="sfUnit">{Number(selectedScheduledJob?.soldSquareFeet) >= 50 ? `Sold: ${Math.round(Number(selectedScheduledJob.soldSquareFeet))} sq ft (filled in from the job; change it if the job is different)` : "Square feet (from the work order)"}</div>
               </div>
 
               {sf > 0 ? (
