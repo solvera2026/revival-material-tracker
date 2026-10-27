@@ -13,7 +13,10 @@ const CONFIG = {
   timezone: "America/Chicago",
   apiTokenProperty: "REVIVAL_API_TOKEN",
   spreadsheetIdProperty: "REVIVAL_SPREADSHEET_ID",
-  weeklyEmailTo: "josh@revivalconcretecoatings.com,luke@revivalconcretecoatings.com,bryce@revivalconcretecoatings.com",
+  weeklyEmailTo: "josh@revivalconcretecoatings.com,luke@revivalconcretecoatings.com,hello@revivalconcretecoatings.com,bryce@revivalconcretecoatings.com",
+  // Counts and reordering live in the 2026 Flake & Chemical Sheet DSM (Bailey counts, Luke orders, Reorder tab forecasts).
+  // This tracker records what each job used and wasted, so it does not keep its own On Hand or send low-stock emails.
+  trackInventory: false,
   lowStockEmailTo: "josh@revivalconcretecoatings.com,hello@revivalconcretecoatings.com",
   lowStockReminderHours: 24,
   weeklyReportHour: 15,
@@ -205,11 +208,13 @@ function submitSignoff_(payload, action) {
     .concat(members.map(n => [workDate, jobId, jobName, n, "Crew", action === "LOADOUT" ? "Loadout" : "Return", entryId, timestamp]));
   appendRows_(ss.getSheetByName(SHEETS.crewDays), crewRows, CREW_DAYS_HEADERS.length);
 
-  lines.forEach(line => {
-    const delta = action === "LOADOUT" ? -line.actualQty : line.returnQty;
-    updateInventory_(line, delta);
-  });
-  if (action === "LOADOUT") checkLowStockAndEmail_(lines.map(line => line.materialId));
+  if (CONFIG.trackInventory) {
+    lines.forEach(line => {
+      const delta = action === "LOADOUT" ? -line.actualQty : line.returnQty;
+      updateInventory_(line, delta);
+    });
+    if (action === "LOADOUT") checkLowStockAndEmail_(lines.map(line => line.materialId));
+  }
   return { ok: true, entryId: entryId, rowsAdded: rows.length, crewDays: crewRows.length, action: action };
 }
 
