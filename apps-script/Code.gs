@@ -17,6 +17,10 @@ const CONFIG = {
   spreadsheetIdProperty: "REVIVAL_SPREADSHEET_ID",
   weeklyEmailTo: "josh@revivalconcretecoatings.com,luke@revivalconcretecoatings.com,hello@revivalconcretecoatings.com,bryce@revivalconcretecoatings.com",
   weeklyReportHour: 15,
+  // Weekday mornings: jobs from the last work day with no Load trailer, and finished jobs with no Return
+  dailyCheckHour: 7,
+  signoffsFrom: "2026-11-02",   // go-live: jobs starting before this date are never flagged
+  dailyCheckTo: "josh@revivalconcretecoatings.com,luke@revivalconcretecoatings.com,hello@revivalconcretecoatings.com,bryce@revivalconcretecoatings.com",
 };
 
 const SHEETS = {
@@ -82,7 +86,7 @@ function setupWorkbook() {
   if (ss.setSpreadsheetTimeZone) ss.setSpreadsheetTimeZone(CONFIG.timezone);
   ensureCoreSheets_();
   seedRoster_();
-  installFridayTrigger();
+  installTriggers();
   return { ok: true, spreadsheetId: ss.getId(), sheetNames: SHEETS };
 }
 
@@ -473,6 +477,144 @@ function installFridayTrigger() {
     .create();
 
   return { ok: true, message: "Friday weekly waste report trigger installed." };
+}
+
+/** Run once from the editor: installs the Friday waste report and the weekday-morning missing sign-off check. */
+function installTriggers() {
+  installFridayTrigger();
+  ScriptApp.getProjectTriggers().forEach(trigger => {
+    if (trigger.getHandlerFunction() === "dailyMissingSignoffs") ScriptApp.deleteTrigger(trigger);
+  });
+  [ScriptApp.WeekDay.MONDAY, ScriptApp.WeekDay.TUESDAY, ScriptApp.WeekDay.WEDNESDAY, ScriptApp.WeekDay.THURSDAY, ScriptApp.WeekDay.FRIDAY].forEach(day => {
+    ScriptApp.newTrigger("dailyMissingSignoffs").timeBased().onWeekDay(day).atHour(CONFIG.dailyCheckHour).nearMinute(0).inTimezone(CONFIG.timezone).create();
+  });
+  return { ok: true, message: "Friday waste report and weekday 7 AM missing sign-off check installed." };
+}
+
+/** "2026-10-28", "2026-10-28 8:30:00", a Date, or "10/28/26" -> "2026-10-28" in Iowa time; "" if unreadable */
+function dayKey_(value) {
+  if (value === "" || value === null || value === undefined) return "";
+  if (Object.prototype.toString.call(value) === "[object Date]") return isNaN(value) ? "" : Utilities.formatDate(value, CONFIG.timezone, "yyyy-MM-dd");
+  const text = String(value).trim();
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[1] + "-" + iso[2] + "-" + iso[3];
+  const us = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (us) { let y = Number(us[3]); if (y < 100) y += 2000; return y + "-" + ("0" + us[1]).slice(-2) + "-" + ("0" + us[2]).slice(-2); }
+  const d = toDate_(text);
+  return d ? Utilities.formatDate(d, CONFIG.timezone, "yyyy-MM-dd") : "";
+}
+
+function addDaysKey_(key, n) {
+  const d = new Date(key + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Weekday mornings at 7 AM CT. Emails the jobs that need a sign-off:
+ *  - No Load trailer: a job that started on the last work day (Friday-Sunday on Mondays) with no loadout.
+ *  - No Return: a job whose last scheduled day has passed and whose latest loadout has no return after it.
+ *    Multi-day jobs aren't flagged until their end date has passed.
+ * Uses the latest "Project Scheduled" row per DripJobs project on the Revival Crew Schedule. Painting jobs are skipped.
+ */
+function dailyMissingSignoffs() {
+  const today = dayKey_(new Date());
+  const weekday = new Date(today + "T12:00:00Z").getUTCDay();   // 0 Sunday .. 6 Saturday
+  const from = addDaysKey_(today, weekday === 1 ? -3 : -1);      // Monday looks back to Friday
+  const yesterday = addDaysKey_(today, -1);
+
+  // schedule: latest row per project (rows are appended in order)
+  const ss = SpreadsheetApp.openById(SCHEDULE_SHEET_ID);
+  const leads = {};
+  const crews = ss.getSheetByName("Crews");
+  if (crews && crews.getLastRow() > 1) {
+    crews.getRange(2, 1, crews.getLastRow() - 1, 2).getValues().forEach(r => {
+      const crew = String(r[0] || "").trim();
+      if (crew) leads[crew] = String(r[1] || "").replace(/\(.*\)/, "").trim();
+    });
+  }
+  const log = ss.getSheetByName("Schedule Log");
+  const values = log.getRange(1, 1, log.getLastRow(), Math.min(log.getLastColumn(), 14)).getValues();
+  const idx = headerIndex_(values[0]);
+  const latest = {}, crewOf = {};
+  values.slice(1).forEach(r => {
+    const id = String(r[idx["Project ID"]] || "").trim();
+    if (!id || String(r[idx["Stage"]] || "") !== "Project Scheduled") return;
+    latest[id] = r;
+    const crew = String(r[idx["Crew"]] || "").trim();
+    if (crew) crewOf[id] = crew;
+  });
+  const jobs = Object.keys(latest).map(id => {
+    const r = latest[id];
+    const start = dayKey_(r[idx["Start Date"]]);
+    let end = dayKey_(r[idx["End Date"]]);
+    if (!end || end < start) end = start;   // DripJobs sometimes sends an end date before the start
+    const crew = String(r[idx["Crew"]] || "").trim() || crewOf[id] || "";
+    return { id: id, customer: String(r[idx["Customer"]] || "").replace(/\s+/g, " ").trim(), start: start, end: end, crew: crew, lead: leads[crew] || "" };
+  }).filter(j => j.customer && j.start && j.start >= CONFIG.signoffsFrom && !/paint/i.test(j.crew));
+
+  // sign-offs: loadouts and returns per job (by DripJobs project ID, or by customer name when typed by hand)
+  const tx = getTransactionObjects_();
+  const keyOf = (id, name) => [String(id || "").trim(), "name:" + normCustomer_(name)];
+  const lastLoad = {}, lastReturn = {}, loadDays = {};
+  tx.forEach(row => {
+    const t = toDate_(row.Timestamp);
+    if (!t) return;
+    keyOf(row["Job ID"], row["Job Name"]).forEach(k => {
+      if (row.Action === "LOADOUT") {
+        if (!lastLoad[k] || t > lastLoad[k]) lastLoad[k] = t;
+        (loadDays[k] = loadDays[k] || []).push(dayKey_(t));
+      }
+      if (row.Action === "RETURN" && (!lastReturn[k] || t > lastReturn[k])) lastReturn[k] = t;
+    });
+  });
+  const find = (map, job) => map[job.id] || map["name:" + normCustomer_(job.customer)];
+
+  const noLoadout = [], noReturn = [];
+  jobs.forEach(job => {
+    const loaded = find(lastLoad, job), returned = find(lastReturn, job);
+    // started on the last work day: needs a loadout from within 3 days before the start
+    if (job.start >= from && job.start <= yesterday) {
+      const days = (loadDays[job.id] || []).concat(loadDays["name:" + normCustomer_(job.customer)] || []);
+      if (!days.some(d => d >= addDaysKey_(job.start, -3))) noLoadout.push(job);
+    }
+    // finished (last scheduled day before today), loaded, and no return after the latest loadout; nag for up to 14 days
+    if (job.end <= yesterday && job.end >= addDaysKey_(today, -14) && loaded && (!returned || returned < loaded)) noReturn.push(job);
+  });
+
+  // loadouts typed by hand that don't match a scheduled job: flag when open more than 3 days
+  const scheduledKeys = {};
+  jobs.forEach(j => { scheduledKeys[j.id] = true; scheduledKeys["name:" + normCustomer_(j.customer)] = true; });
+  const unmatched = listOpenJobs_().filter(o => !scheduledKeys[String(o.jobId).trim()] && !scheduledKeys["name:" + normCustomer_(o.jobName)])
+    .filter(o => { const d = dayKey_(o.workDate); return d && d >= CONFIG.signoffsFrom && d <= addDaysKey_(today, -3); });
+
+  if (!noLoadout.length && !noReturn.length && !unmatched.length) return { ok: true, sent: false };
+
+  const who = j => [j.crew || "No crew assigned", j.lead ? "lead: " + j.lead : ""].filter(Boolean).join(", ");
+  const dates = j => j.start === j.end ? formatKey_(j.start) : formatKey_(j.start) + " - " + formatKey_(j.end);
+  const section = (title, rows) => rows.length
+    ? `<h3>${title} (${rows.length})</h3><table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;"><tr style="background:#1a1a1a;color:#fff;"><th>Customer</th><th>Scheduled</th><th>Crew</th></tr>` +
+      rows.map(j => `<tr><td>${escapeHtml_(j.customer)}</td><td>${dates(j)}</td><td>${escapeHtml_(who(j))}</td></tr>`).join("") + "</table>"
+    : "";
+  const html = `<div style="font-family:Arial,sans-serif;"><h2>Material Tracker: missing sign-offs</h2>` +
+    section("No Load trailer sign-off", noLoadout) +
+    section("Job finished, no Return materials sign-off", noReturn) +
+    (unmatched.length ? `<h3>Loaded more than 3 days ago with no return, not on the schedule (${unmatched.length})</h3><ul>` +
+      unmatched.map(o => `<li>${escapeHtml_(o.jobName || o.jobId)}: loaded ${escapeHtml_(o.workDate)} by ${escapeHtml_(o.crewLead || "?")}</li>`).join("") + "</ul>" : "") +
+    `<p>Crew leads can still sign late: open the app, pick the job and submit. Multi-day jobs aren't flagged for a return until their last scheduled day has passed.</p></div>`;
+  const plain = [
+    noLoadout.length ? "No Load trailer: " + noLoadout.map(j => `${j.customer} (${who(j)})`).join("; ") : "",
+    noReturn.length ? "No Return: " + noReturn.map(j => `${j.customer} (${who(j)})`).join("; ") : "",
+    unmatched.length ? "Open loadouts not on the schedule: " + unmatched.map(o => o.jobName || o.jobId).join("; ") : "",
+  ].filter(Boolean).join("\n");
+  const count = noLoadout.length + noReturn.length + unmatched.length;
+  MailApp.sendEmail({ to: CONFIG.dailyCheckTo, subject: `Material Tracker: ${count} missing sign-off${count === 1 ? "" : "s"} (${formatKey_(today)})`, body: plain, htmlBody: html });
+  return { ok: true, sent: true, noLoadout: noLoadout.length, noReturn: noReturn.length, unmatched: unmatched.length };
+}
+
+function formatKey_(key) {
+  const p = String(key).split("-");
+  return p.length === 3 ? Number(p[1]) + "/" + Number(p[2]) : String(key);
 }
 
 function ensureCoreSheets_() {
