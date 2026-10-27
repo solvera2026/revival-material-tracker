@@ -31,7 +31,7 @@ const BASE_COLORS = [
 
 const FLAKE_TYPES = [
   { id: "CLASSIC", label: 'Classic 1/4" Flake', coverage: 250, hasColor: true },
-  { id: "NATURAL_STONE", label: "Natural Stone Flake", coverage: 250, hasColor: true },
+  { id: "NATURAL_STONE", label: "Natural Stone Flake", coverage: 175, hasColor: true },
   { id: "QUARTZ", label: "Quartz", coverage: 50, hasColor: false },
 ];
 
