@@ -399,10 +399,28 @@ function weeklyWasteReport() {
   ensureCoreSheets_();
   const now = new Date();
   const weekStart = startOfWorkWeek_(now);
-  const tx = getTransactionObjects_().filter(row => {
+  const allTx = getTransactionObjects_();
+  const thisWeek = allTx.filter(row => {
     const d = toDate_(row.Timestamp);
     return d && d >= weekStart && d <= now;
   });
+  // A job loaded out last week (Thursday/Friday or a multi-day job) and returned this week still needs its loadout,
+  // or the return would look like material that was never used. Pull in that job's loadouts since its previous return.
+  const returnedThisWeek = {};
+  thisWeek.forEach(row => { if (row.Action === "RETURN") returnedThisWeek[String(row["Job ID"] || "").trim()] = true; });
+  const priorReturn = {};
+  allTx.forEach(row => {
+    const jobId = String(row["Job ID"] || "").trim();
+    const d = toDate_(row.Timestamp);
+    if (row.Action === "RETURN" && d && d < weekStart && (!priorReturn[jobId] || d > priorReturn[jobId])) priorReturn[jobId] = d;
+  });
+  const earlierLoadouts = allTx.filter(row => {
+    const jobId = String(row["Job ID"] || "").trim();
+    const d = toDate_(row.Timestamp);
+    return row.Action === "LOADOUT" && returnedThisWeek[jobId] && d && d < weekStart &&
+      d > new Date(weekStart.getTime() - 30 * 864e5) && (!priorReturn[jobId] || d > priorReturn[jobId]);
+  });
+  const tx = earlierLoadouts.concat(thisWeek);
 
   const loadoutJobs = {};
   const returnedJobs = {};
