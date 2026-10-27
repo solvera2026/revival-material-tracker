@@ -9,26 +9,21 @@
  *   3. Deploy > New deployment > Web app: Execute as "Me", Who has access "Anyone". Copy the /exec URL into Netlify as APPS_SCRIPT_URL.
  */
 
+// Counts and reordering live in the 2026 Flake & Chemical Sheet DSM (Bailey counts, Luke orders, Reorder tab forecasts).
+// This tracker only records what each job loaded, returned and wasted; it keeps no inventory.
 const CONFIG = {
   timezone: "America/Chicago",
   apiTokenProperty: "REVIVAL_API_TOKEN",
   spreadsheetIdProperty: "REVIVAL_SPREADSHEET_ID",
   weeklyEmailTo: "josh@revivalconcretecoatings.com,luke@revivalconcretecoatings.com,hello@revivalconcretecoatings.com,bryce@revivalconcretecoatings.com",
-  // Counts and reordering live in the 2026 Flake & Chemical Sheet DSM (Bailey counts, Luke orders, Reorder tab forecasts).
-  // This tracker records what each job used and wasted, so it does not keep its own On Hand or send low-stock emails.
-  trackInventory: false,
-  lowStockEmailTo: "josh@revivalconcretecoatings.com,hello@revivalconcretecoatings.com",
-  lowStockReminderHours: 24,
   weeklyReportHour: 15,
 };
 
 const SHEETS = {
-  inventory: "Inventory",
   transactions: "Crew Entries",
   crewDays: "Crew Days",
   roster: "Crew Roster",
   weekly: "Waste Report",
-  lowStock: "Low Stock Alerts",
 };
 
 // Revival Crew Schedule (DripJobs -> Zapier): the jobs crews load out for. Job ID = DripJobs project ID.
@@ -40,11 +35,6 @@ const SCHEDULE_LOOKAHEAD_DAYS = 7;   // and jobs starting in the next week (load
 const FLAKE_SHEET_ID = "1BLz7pDUtBW5Hfta8Z-MS7-jQ1JG5I0o3c9cmVvTMKZU";
 
 const SHEET_RENAMES = [];
-
-const INVENTORY_HEADERS = [
-  "Material ID", "Material Name", "Category", "Unit", "Increment", "On Hand",
-  "Reorder Point", "Target Stock", "Supplier/SKU", "Last Count Date", "Notes"
-];
 
 const TX_HEADERS = [
   "Timestamp", "Entry ID", "Action", "Job ID", "Job Name", "Crew Lead", "Crew Members", "Work Date",
@@ -77,43 +67,6 @@ const WEEKLY_HEADERS = [
   "Expected Use", "Consumed", "Waste Qty", "Waste %", "Status"
 ];
 
-const LOW_STOCK_HEADERS = [
-  "Timestamp", "Material ID", "Material Name", "On Hand", "Reorder Point",
-  "Target Stock", "Recommended Order Qty", "Notified"
-];
-
-// Material IDs must match the app (src/App.jsx). On Hand starts at 0: do a shop count and enter it.
-const CLASSIC_COLORS = ["Antler", "Basalt", "Cabin Fever", "Chestnut", "Coyote", "Creekbed", "Domino", "Granite", "Gravel", "Keystone", "Lanai Gray", "Mt. Everest", "Nightfall", "Orbit", "Outback", "Shoreline", "Silver Creek", "Stoney Creek", "Tidal Wave", "Wombat"];
-const NATURAL_STONE_COLORS = ["Anchorage", "Armadillo", "Claystone", "Husky", "Shale", "Slate", "Turquoise"];
-// Torginol (manufacturer) names used for ordering; the material IDs keep the old names so history doesn't change.
-const TORGINOL_NAMES = { "Mt. Everest": "Mount Everest Match", "Silver Creek": "Silvercreek Match", "Stoney Creek": "Stony Creek" };
-
-function seedInventoryRows_() {
-  const rows = [];
-  [["GRAY", "Gray"], ["TAN", "Tan"], ["CLEAR", "Clear"]].forEach(([id, label]) => {
-    rows.push(["POLYUREA_" + id, "Polyurea Basecoat - " + label, "Base Coat", "gal", 0.25, 0, 15, 45, "PolyTitan", "", "Mixed gallons (2:1). 15-gal kits; 200 SF/gal."]);
-  });
-  [["GRAY", "Gray"], ["TAN", "Tan"], ["CLEAR", "Clear"]].forEach(([id, label]) => {
-    rows.push(["FC1150_" + id, "1150FC Basecoat - " + label, "Base Coat", "kit", 1, 0, 2, 4, "Simiron", "", "3-gal kits; 125 SF/gal = 375 SF/kit."]);
-  });
-  rows.push(["MVB", "MVB Moisture Barrier", "Moisture Barrier", "kit", 1, 0, 2, 4, "Simiron", "", "3-gal kits; 125 SF/gal = 375 SF/kit."]);
-  rows.push(["EPOXY_BASE", "Epoxy Basecoat", "Base Coat", "kit", 1, 0, 2, 4, "Simiron", "", "3-gal kits; 150 SF/gal. High-Wear Urethane system base."]);
-  rows.push(["POLYASPARTIC", "Polyaspartic Topcoat", "Topcoat", "gal", 0.25, 0, 20, 50, "PolyTitan", "", "Mixed gallons (1:1). 10-gal kits; 125 SF/gal."]);
-  rows.push(["HWU_TOP", "High-Wear Urethane Topcoat", "Topcoat", "gal", 1, 0, 2, 4, "Simiron", "", "1-gal kits; 600 SF/gal."]);
-  rows.push(["EPS_971", "971 EPS Epoxy Siloxane", "Clear Coat", "gal", 1, 0, 2, 4, "Simiron", "", "1-gal kits; 300 SF/gal. Grind & clear."]);
-  rows.push(["QUARTZ", "Quartz", "Quartz", "box", 0.25, 0, 2, 5, "Sherwin-Williams", "", "50 SF/box."]);
-  CLASSIC_COLORS.forEach(c => rows.push(["FLAKE_CLASSIC_" + slug_(c), (TORGINOL_NAMES[c] || c) + " Flake", "Flake", "box", 0.25, 0, 4, 10, "Sherwin-Williams", "", "Classic 1/4\" flake; 250 SF/box."]));
-  rows.push(["FLAKE_CLASSIC_OTHER", "Other Flake", "Flake", "box", 0.25, 0, "", "", "", "", "Color written in the loadout notes."]);
-  NATURAL_STONE_COLORS.forEach(c => rows.push(["FLAKE_NATURAL_STONE_" + slug_(c), c + " Natural Stone Flake", "Flake", "box", 0.25, 0, 2, 5, "Sherwin-Williams", "", "Natural stone flake; 250 SF/box."]));
-  rows.push(["FLAKE_NATURAL_STONE_OTHER", "Other Natural Stone Flake", "Flake", "box", 0.25, 0, "", "", "", "", "Color written in the loadout notes."]);
-  return rows;
-}
-
-/** Same as the app: "Mt. Everest" -> "MT_EVEREST" */
-function slug_(text) {
-  return String(text).toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "");
-}
-
 /** Makes a long random token, saves it as the REVIVAL_API_TOKEN script property, and shows it in the Execution log to copy into Netlify. */
 function createApiToken() {
   const token = "rev_" + Utilities.getUuid().replace(/-/g, "") + Utilities.getUuid().replace(/-/g, "");
@@ -128,17 +81,9 @@ function setupWorkbook() {
   // work dates are saved as dates; keep the sheet on Iowa time so a date never shifts a day
   if (ss.setSpreadsheetTimeZone) ss.setSpreadsheetTimeZone(CONFIG.timezone);
   ensureCoreSheets_();
-  seedInventory_();
   seedRoster_();
   installFridayTrigger();
   return { ok: true, spreadsheetId: ss.getId(), sheetNames: SHEETS };
-}
-
-function seedInventory_() {
-  const sheet = getSpreadsheet_().getSheetByName(SHEETS.inventory);
-  if (sheet.getLastRow() > 1) return;
-  const rows = seedInventoryRows_();
-  sheet.getRange(2, 1, rows.length, INVENTORY_HEADERS.length).setValues(rows);
 }
 
 function seedRoster_() {
@@ -208,13 +153,6 @@ function submitSignoff_(payload, action) {
     .concat(members.map(n => [workDate, jobId, jobName, n, "Crew", action === "LOADOUT" ? "Loadout" : "Return", entryId, timestamp]));
   appendRows_(ss.getSheetByName(SHEETS.crewDays), crewRows, CREW_DAYS_HEADERS.length);
 
-  if (CONFIG.trackInventory) {
-    lines.forEach(line => {
-      const delta = action === "LOADOUT" ? -line.actualQty : line.returnQty;
-      updateInventory_(line, delta);
-    });
-    if (action === "LOADOUT") checkLowStockAndEmail_(lines.map(line => line.materialId));
-  }
   return { ok: true, entryId: entryId, rowsAdded: rows.length, crewDays: crewRows.length, action: action };
 }
 
@@ -245,25 +183,6 @@ function normalizeLine_(line) {
     actualQty: number_(line.actualQty),
     returnQty: number_(line.returnQty),
   };
-}
-
-function updateInventory_(line, delta) {
-  if (!line.materialId || !delta) return;
-  const sheet = getSpreadsheet_().getSheetByName(SHEETS.inventory);
-  const values = sheet.getDataRange().getValues();
-  const index = headerIndex_(values[0]);
-  let rowNumber = -1;
-  for (let r = 1; r < values.length; r++) {
-    if (String(values[r][index["Material ID"]] || "").trim() === line.materialId) { rowNumber = r + 1; break; }
-  }
-  if (rowNumber < 0) {
-    rowNumber = sheet.getLastRow() + 1;
-    sheet.getRange(rowNumber, 1, 1, INVENTORY_HEADERS.length).setValues([[line.materialId, line.materialName, line.category, line.unit, 1, 0, "", "", "", "", "Added automatically from app submission."]]);
-  }
-  const onHandCol = index["On Hand"] + 1;
-  const current = number_(sheet.getRange(rowNumber, onHandCol).getValue());
-  const increment = number_(sheet.getRange(rowNumber, index["Increment"] + 1).getValue()) || 0.25;
-  sheet.getRange(rowNumber, onHandCol).setValue(roundToIncrement_(current + delta, increment));
 }
 
 function listRoster_() {
@@ -540,56 +459,6 @@ function sendWeeklyEmail_(reportTime, weekStart, weekEnd, summaries, openJobs) {
   MailApp.sendEmail({ to: CONFIG.weeklyEmailTo, subject: subject, body: plainBody, htmlBody: htmlBody });
 }
 
-function checkLowStockAndEmail_(changedMaterialIds) {
-  const changed = {};
-  (changedMaterialIds || []).forEach(id => changed[String(id || "").trim()] = true);
-  const ss = getSpreadsheet_();
-  const inventory = ss.getSheetByName(SHEETS.inventory);
-  const alerts = ss.getSheetByName(SHEETS.lowStock);
-  const values = inventory.getDataRange().getValues();
-  if (values.length < 2) return;
-  const idx = headerIndex_(values[0]);
-  const alertRows = [];
-
-  for (let r = 1; r < values.length; r++) {
-    const row = values[r];
-    const materialId = String(row[idx["Material ID"]] || "").trim();
-    if (!materialId) continue;
-    if (changedMaterialIds && !changed[materialId]) continue;
-    const onHand = number_(row[idx["On Hand"]]);
-    const reorderPoint = number_(row[idx["Reorder Point"]]);
-    const targetStock = number_(row[idx["Target Stock"]]);
-    if (reorderPoint <= 0) continue;
-    if (onHand <= reorderPoint && !hasRecentLowStockAlert_(materialId)) {
-      const recommendedOrderQty = Math.max(targetStock - onHand, 0);
-      alertRows.push([new Date(), materialId, row[idx["Material Name"]], onHand, reorderPoint, targetStock, recommendedOrderQty, "YES"]);
-    }
-  }
-
-  if (!alertRows.length) return;
-  appendRows_(alerts, alertRows, LOW_STOCK_HEADERS.length);
-
-  const lines = alertRows.map(row => `${row[2]} (${row[1]}): on hand ${row[3]}, reorder point ${row[4]}, recommended order ${row[6]}`).join("\n");
-  MailApp.sendEmail({
-    to: CONFIG.lowStockEmailTo,
-    subject: "Revival Low Stock Alert",
-    body: `The following materials are at or below reorder point:\n\n${lines}`,
-  });
-}
-
-function hasRecentLowStockAlert_(materialId) {
-  const alerts = getSpreadsheet_().getSheetByName(SHEETS.lowStock);
-  const values = alerts.getDataRange().getValues();
-  const cutoff = new Date(Date.now() - CONFIG.lowStockReminderHours * 60 * 60 * 1000);
-  for (let r = values.length - 1; r >= 1; r--) {
-    if (String(values[r][1] || "").trim() === materialId) {
-      const timestamp = toDate_(values[r][0]);
-      return timestamp && timestamp >= cutoff;
-    }
-  }
-  return false;
-}
-
 function installFridayTrigger() {
   ScriptApp.getProjectTriggers().forEach(trigger => {
     if (trigger.getHandlerFunction() === "weeklyWasteReport") ScriptApp.deleteTrigger(trigger);
@@ -608,10 +477,8 @@ function installFridayTrigger() {
 
 function ensureCoreSheets_() {
   migrateSheetNamesForProductionView_();
-  ensureSheetWithHeaders_(SHEETS.inventory, INVENTORY_HEADERS);
   ensureSheetWithHeaders_(SHEETS.transactions, TX_HEADERS);
   ensureSheetWithHeaders_(SHEETS.weekly, WEEKLY_HEADERS);
-  ensureSheetWithHeaders_(SHEETS.lowStock, LOW_STOCK_HEADERS);
   ensureSheetWithHeaders_(SHEETS.crewDays, CREW_DAYS_HEADERS);
   ensureSheetWithHeaders_(SHEETS.roster, ROSTER_HEADERS);
 }
