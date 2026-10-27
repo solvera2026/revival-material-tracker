@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const PRIMARY = "#22303c";
-const ACCENT = "#e07a1f";
+const PRIMARY = "#111111";
+const ACCENT = "#fdd105";
 const DARK = "#1a1a1a";
 const BASE_RED = "#b91c1c";
 const BLUE = "#1a5276";
@@ -526,12 +526,12 @@ export default function App() {
     <div className="page">
       <style>{styles}</style>
       <header className="header">
-        <div className="headerContent">
-          <div className="eyebrow">Revival Concrete Coatings</div>
-          <h1>Material Loadout</h1>
-          <div className="headerText">Load, return, and sign off materials and crew.</div>
-        </div>
+        <img className="headerLogo" src="/revival-logo.png" alt="Revival Concrete Coatings" />
       </header>
+      <div className="titleBar">
+        <h1>Material Loadout</h1>
+        <div className="headerText">Load, return, and sign off materials and crew.</div>
+      </div>
       <div className="accentBar" />
 
       <main className="main">
@@ -656,17 +656,16 @@ const styles = `
 body { margin: 0; background: ${BG}; font-family: 'Barlow', sans-serif; color: ${DARK}; }
 button, input, select, textarea { font: inherit; }
 .page { max-width: 480px; min-height: 100vh; margin: 0 auto; background: ${BG}; }
-.header { background: ${PRIMARY}; color: #fff; padding: 20px 20px 22px; position: relative; overflow: hidden; }
-.header:after { content: ''; position: absolute; width: 130px; height: 130px; border-radius: 50%; right: -34px; bottom: -38px; background: rgba(255,255,255,.06); }
-.headerContent { position: relative; z-index: 1; }
-.eyebrow { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; opacity: .75; }
-h1 { font-family: 'Barlow Condensed', sans-serif; font-size: 34px; line-height: 1; margin: 4px 0; font-weight: 900; }
+.header { background: #fff; padding: 18px 20px 14px; text-align: center; }
+.headerLogo { width: 100%; max-width: 260px; height: auto; display: block; margin: 0 auto; }
+.titleBar { background: ${PRIMARY}; color: #fff; padding: 14px 20px 16px; }
+h1 { font-family: 'Barlow Condensed', sans-serif; font-size: 30px; line-height: 1; margin: 0 0 4px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; color: ${ACCENT}; }
 .headerText { font-size: 13px; opacity: .86; }
-.accentBar { height: 4px; background: ${ACCENT}; }
+.accentBar { height: 5px; background: ${ACCENT}; }
 .main { padding: 18px 16px 24px; }
 .modeToggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: #fff; padding: 6px; border-radius: 14px; border: 1px solid #ddd; margin-bottom: 16px; }
 .modeToggle button { border: 0; border-radius: 10px; padding: 12px 8px; background: transparent; color: #777; font-family: 'Barlow Condensed', sans-serif; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; }
-.modeToggle button.active { background: ${DARK}; color: #fff; }
+.modeToggle button.active { background: ${DARK}; color: ${ACCENT}; }
 .field { margin-bottom: 14px; }
 .label { display: block; font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #888; margin-bottom: 6px; }
 .fieldHint { color: #888; font-size: 12px; margin-top: 6px; line-height: 1.35; }
@@ -676,13 +675,13 @@ h1 { font-family: 'Barlow Condensed', sans-serif; font-size: 34px; line-height: 
 .chevron { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: #aaa; pointer-events: none; font-family: 'Barlow Condensed', sans-serif; font-weight: 900; }
 select, .textInput, .notes { width: 100%; border: 2px solid #e0e0e0; border-radius: 10px; background: #fff; color: ${DARK}; padding: 13px 14px; outline: none; }
 select { appearance: none; padding-right: 42px; }
-select:focus, .textInput:focus, .notes:focus { border-color: ${ACCENT}; }
+select:focus, .textInput:focus, .notes:focus { border-color: ${PRIMARY}; }
 .notes { min-height: 80px; resize: vertical; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { border: 2px solid #ddd; background: #fff; color: #555; border-radius: 999px; padding: 9px 13px; font-weight: 600; font-size: 14px; }
-.chip.on { border-color: ${PRIMARY}; background: ${PRIMARY}; color: #fff; }
+.chip.on { border-color: ${PRIMARY}; background: ${PRIMARY}; color: ${ACCENT}; }
 .sfInput { width: 100%; padding: 16px; text-align: center; font-family: 'Barlow Condensed', sans-serif; font-size: 56px; font-weight: 900; border: 3px solid #e0e0e0; border-radius: 10px; background: #fff; color: #bbb; outline: none; }
-.sfInput.hasValue { border-color: ${ACCENT}; color: ${DARK}; }
+.sfInput.hasValue { border-color: ${PRIMARY}; color: ${DARK}; }
 .sfUnit { text-align: center; margin-top: 4px; font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #bbb; }
 .resultsLabel { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 800; color: #888; letter-spacing: 2px; text-transform: uppercase; margin: 2px 0 10px; }
 .materialCard { background: #fff; border: 3px solid; border-radius: 14px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 0 rgba(0,0,0,.04); }
@@ -711,7 +710,7 @@ select:focus, .textInput:focus, .notes:focus { border-color: ${ACCENT}; }
 .status { border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; font-weight: 700; }
 .status.success { background: #dcfce7; color: ${GREEN}; border: 1px solid #86efac; }
 .status.error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
-.submitButton { width: 100%; border: 0; background: ${DARK}; color: #fff; border-radius: 12px; padding: 15px 18px; font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.5px; }
+.submitButton { width: 100%; border: 0; background: ${ACCENT}; color: ${DARK}; border-radius: 12px; padding: 15px 18px; font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.5px; }
 .submitButton:disabled { opacity: .55; }
 .footer { background: ${DARK}; color: rgba(255,255,255,.42); text-align: center; padding: 16px 20px; font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; }
 input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
