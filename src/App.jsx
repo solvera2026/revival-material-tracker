@@ -187,18 +187,21 @@ function TextField({ label, value, onChange, placeholder, required, list, type }
 }
 
 /** Tap names to mark who is on the job. The lead is always included. */
-function CrewPicker({ label, roster, lead, selected, onToggle }) {
+function CrewPicker({ label, roster, lead, selected, onToggle, solo, onSolo }) {
   return (
     <div className="field">
-      <Label>{label}</Label>
+      <Label>{label} *</Label>
       <div className="chips">
+        <button type="button" className={`chip solo ${solo ? "on" : ""}`} onClick={onSolo}>
+          {solo ? "✓ " : ""}Just me (nobody else)
+        </button>
         {roster.filter((name) => name !== lead).map((name) => (
           <button type="button" key={name} className={`chip ${selected.includes(name) ? "on" : ""}`} onClick={() => onToggle(name)}>
             {selected.includes(name) ? "✓ " : ""}{name}
           </button>
         ))}
       </div>
-      <div className="fieldHint">Tap everyone working this job with {lead || "the lead"}. This is how labor gets counted for the job.</div>
+      <div className="fieldHint">Required. Tap everyone working this job with {lead || "the lead"}, or "Just me" if nobody else is on it. This is how labor gets counted for the job.</div>
     </div>
   );
 }
@@ -292,6 +295,7 @@ export default function App() {
   const [customerName, setCustomerName] = useState("");
   const [crewLead, setCrewLead] = useState("");
   const [crewMembers, setCrewMembers] = useState([]);
+  const [workingSolo, setWorkingSolo] = useState(false);
   const [workDate, setWorkDate] = useState(todayIso());
   const [signature, setSignature] = useState("");
   const [notes, setNotes] = useState("");
@@ -379,7 +383,13 @@ export default function App() {
     if (colors.length && !colors.includes(flakeColor)) setFlakeColor(colors[0]);
   }
 
+  function chooseSolo() {
+    setWorkingSolo((current) => !current);
+    setCrewMembers([]);
+  }
+
   function toggleMember(name) {
+    setWorkingSolo(false);
     setCrewMembers((current) => (current.includes(name) ? current.filter((n) => n !== name) : [...current, name]));
   }
 
@@ -398,6 +408,7 @@ export default function App() {
     setCustomerName("");
     setSelectedReturnJob(null);
     setSelectedScheduledJob(null);
+    setWorkingSolo(false);
     lastDefaultsKey.current = "";
   }
 
@@ -413,7 +424,9 @@ export default function App() {
     setStatus({ type: "", text: "" });
     if (!match) { setLineQuantities({}); return; }
     setCrewLead(match.crewLead || "");
-    setCrewMembers(String(match.crewMembers || "").split(",").map((s) => s.trim()).filter(Boolean));
+    const loadedCrew = String(match.crewMembers || "").split(",").map((s) => s.trim()).filter(Boolean);
+    setCrewMembers(loadedCrew);
+    setWorkingSolo(loadedCrew.length === 0);
     const defaults = {};
     normalizeReturnLines(match).forEach((line) => { defaults[line.lineKey] = ""; });
     setLineQuantities(defaults);
@@ -430,6 +443,10 @@ export default function App() {
         setStatus({ type: "error", text: "Pick the job, crew lead, work date, square footage, and sign before submitting." });
         return;
       }
+      if (crewMembers.length === 0 && !workingSolo) {
+        setStatus({ type: "error", text: `Tap everyone on the job with ${crewLead}, or tap "Just me" if nobody else is on it.` });
+        return;
+      }
       if (otherFlake && !notes.trim()) {
         setStatus({ type: "error", text: "Write the flake color in the notes." });
         return;
@@ -437,6 +454,10 @@ export default function App() {
     } else {
       if (!selectedReturnJob || !signature.trim() || !crewLead || !workDate || submissionLines.length === 0) {
         setStatus({ type: "error", text: "Select the loaded job, confirm who was on the job, enter returned quantities, and sign." });
+        return;
+      }
+      if (crewMembers.length === 0 && !workingSolo) {
+        setStatus({ type: "error", text: `Confirm who was on the job today with ${crewLead}, or tap "Just me".` });
         return;
       }
       if (submissionLines.some((line) => lineQuantities[line.lineKey] === undefined || lineQuantities[line.lineKey] === "")) {
@@ -516,6 +537,8 @@ export default function App() {
           lead={crewLead}
           selected={crewMembers}
           onToggle={toggleMember}
+          solo={workingSolo}
+          onSolo={chooseSolo}
         />
       )}
       <TextField label={mode === "LOADOUT" ? "Work date" : "Last day on the job"} type="date" value={workDate} onChange={setWorkDate} required />
@@ -680,6 +703,8 @@ select:focus, .textInput:focus, .notes:focus { border-color: ${PRIMARY}; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { border: 2px solid #ddd; background: #fff; color: #555; border-radius: 999px; padding: 9px 13px; font-weight: 600; font-size: 14px; }
 .chip.on { border-color: ${PRIMARY}; background: ${PRIMARY}; color: ${ACCENT}; }
+.chip.solo { border-style: dashed; }
+.chip.solo.on { border-style: solid; }
 .sfInput { width: 100%; padding: 16px; text-align: center; font-family: 'Barlow Condensed', sans-serif; font-size: 56px; font-weight: 900; border: 3px solid #e0e0e0; border-radius: 10px; background: #fff; color: #bbb; outline: none; }
 .sfInput.hasValue { border-color: ${PRIMARY}; color: ${DARK}; }
 .sfUnit { text-align: center; margin-top: 4px; font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #bbb; }
