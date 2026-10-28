@@ -44,7 +44,7 @@ const TX_HEADERS = [
   "Timestamp", "Entry ID", "Action", "Job ID", "Job Name", "Crew Lead", "Crew Members", "Work Date",
   "System ID", "System Name", "Square Feet", "Flake ID", "Material ID", "Material Name",
   "Category", "Unit", "Expected Use", "Safety Qty", "Recommended Load", "Actual Qty",
-  "Return Qty", "Waste Qty", "Waste %", "Signature", "Notes", "Source"
+  "Return Qty", "Waste Qty", "Waste %", "Signature", "Notes", "Source", "Add-ons", "Coated Sq Ft"
 ];
 
 // One row per person per job per day. The job labor report joins this to Gusto hours.
@@ -132,6 +132,7 @@ function submitSignoff_(payload, action) {
   validatePayload_(payload, action);
   const ss = getSpreadsheet_();
   const sheet = ss.getSheetByName(SHEETS.transactions);
+  ensureTxHeaders_(sheet);
   const timestamp = new Date();
   const entryId = Utilities.getUuid();
   const lines = (payload.lines || []).map(normalizeLine_);
@@ -149,6 +150,7 @@ function submitSignoff_(payload, action) {
     action === "LOADOUT" ? line.actualQty : 0,
     action === "RETURN" ? line.returnQty : 0,
     "", "", String(payload.signature || "").trim(), String(payload.notes || "").trim(), "Netlify app",
+    String(payload.addons || "").trim(), number_(payload.coatedSquareFeet) || "",
   ]);
   appendRows_(sheet, rows, TX_HEADERS.length);
 
@@ -233,7 +235,7 @@ function listScheduledJobs_() {
     const crew = String(r[idx["Crew"]] || "").trim();
     const customer = String(r[idx["Customer"]] || "").replace(/\s+/g, " ").trim();
     return { projectId: id, customer: customer, crew: crew, crewLead: leads[crew] || "", start: start, end: end,
-      address: String(r[idx["Address"]] || "").trim() };
+      address: String(r[idx["Address"]] || "").trim(), crewNotes: String(r[idx["Crew Notes"]] || "") };
   })
     .filter(j => j.customer && j.start && j.start >= from && j.start <= to)
     .sort((a, b) => a.start - b.start)
@@ -241,7 +243,8 @@ function listScheduledJobs_() {
       const dates = formatShort_(j.start) + (j.end && formatShort_(j.end) !== formatShort_(j.start) ? " - " + formatShort_(j.end) : "");
       const d = sold[normCustomer_(j.customer)] || {};
       return { projectId: j.projectId, customer: j.customer, crew: j.crew, crewLead: j.crewLead, dates: dates,
-        label: j.customer + " - " + dates, soldSquareFeet: d.sqft || "", flakeColor: d.flake || "", baseCoat: d.base || "" };
+        label: j.customer + " - " + dates, soldSquareFeet: d.sqft || "", flakeColor: d.flake || "", baseCoat: d.base || "",
+        crewNotes: j.crewNotes };   // the app reads the verticals / stairs / extra topcoat lines from these
     });
 }
 
@@ -646,6 +649,13 @@ function ensureSheetWithHeaders_(name, headers) {
   const isEmpty = currentHeaders.every(value => value === "");
   if (isEmpty) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   return sheet;
+}
+
+/** Adds header cells (and sheet columns) for columns added after the sheet was set up (Add-ons, Coated Sq Ft). */
+function ensureTxHeaders_(sheet) {
+  if (sheet.getMaxColumns() < TX_HEADERS.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), TX_HEADERS.length - sheet.getMaxColumns());
+  const have = sheet.getRange(1, 1, 1, TX_HEADERS.length).getValues()[0];
+  TX_HEADERS.forEach((h, i) => { if (!String(have[i] || "").trim()) sheet.getRange(1, i + 1).setValue(h); });
 }
 
 function getTransactionObjects_() {
