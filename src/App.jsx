@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { parseAddons, addonSqft, addonSummary, withExtraTopcoat, SQFT_PER_STEP, SQFT_PER_STAIRCASE, VERTICAL_DEFAULT_IN } from "./addons.js";
 
 const PRIMARY = "#111111";
 const ACCENT = "#fdd105";
@@ -176,6 +177,57 @@ function buildMaterialLines(system, opts, squareFeet) {
 }
 
 // ---------- small components ----------
+// Extra topcoat from the work order: same coverage as the normal topcoat of that product.
+const EXTRA_TOPCOATS = {
+  HWU: { materialId: "HWU_TOP", materialName: "High-Wear Urethane Topcoat", coverage: 600, step: 1, safety: 1, color: BLUE },
+  POLYASPARTIC: { materialId: "POLYASPARTIC", materialName: "Polyaspartic Topcoat", coverage: 125, step: 0.25, safety: 1, color: BLUE },
+};
+const EMPTY_ADDONS = { verticalFt: "", verticalIn: String(VERTICAL_DEFAULT_IN), steps: "", staircases: "", extraTopcoat: "" };
+function addonsFromNotes(notes) {
+  const a = parseAddons(notes);
+  return {
+    addons: { verticalFt: a.verticalFt ? String(a.verticalFt) : "", verticalIn: String(a.verticalIn), steps: a.steps ? String(a.steps) : "",
+      staircases: a.staircases ? String(a.staircases) : "", extraTopcoat: a.extraTopcoat },
+    note: a.mention || (a.verticalFt || a.steps || a.staircases || a.extraTopcoat ? "Filled in from the work order. Change it if the job is different." : ""),
+  };
+}
+
+function AddonsFields({ value, onChange, note, floorSf }) {
+  const set = (key) => (event) => onChange({ ...value, [key]: event.target.value });
+  const extra = addonSqft(value).total;
+  const box = (key, label) => (
+    <div>
+      <div className="miniLabel">{label}</div>
+      <input className="textInput" type="number" inputMode="decimal" min="0" placeholder="0" value={value[key]} onChange={set(key)} />
+    </div>
+  );
+  return (
+    <div className="field">
+      <Label>Add-ons</Label>
+      {note && <div className="addonNote">{note}</div>}
+      <div className="addonGrid">
+        {box("verticalFt", "Verticals (linear ft)")}
+        {box("verticalIn", "Vertical height (inches)")}
+        {box("steps", "Stair steps")}
+        {box("staircases", "Full staircases")}
+      </div>
+      <div className="selectWrap">
+        <select value={value.extraTopcoat} onChange={set("extraTopcoat")}>
+          <option value="">No extra topcoat</option>
+          <option value="HWU">Extra topcoat: High-Wear Urethane</option>
+          <option value="POLYASPARTIC">Extra topcoat: Polyaspartic</option>
+        </select>
+        <span className="chevron">v</span>
+      </div>
+      <div className="fieldHint">
+        {extra > 0
+          ? `Adds ${Math.round(extra)} sq ft (verticals: length x height; ${SQFT_PER_STEP} sq ft per step, ${SQFT_PER_STAIRCASE} per full staircase). Materials below cover ${Math.round(floorSf + extra)} sq ft.`
+          : "From the work order: verticals, stairs and an extra topcoat. Leave blank if there are none."}
+      </div>
+    </div>
+  );
+}
+
 function Label({ children }) {
   return <label className="label">{children}</label>;
 }
@@ -321,6 +373,8 @@ export default function App() {
   const [scheduledLoaded, setScheduledLoaded] = useState(false);
   const [selectedScheduledJob, setSelectedScheduledJob] = useState(null);
   const [selectedReturnJob, setSelectedReturnJob] = useState(null);
+  const [addons, setAddons] = useState(EMPTY_ADDONS);
+  const [addonNote, setAddonNote] = useState("");
   const lastDefaultsKey = useRef("");
 
   const system = SYSTEMS.find((item) => item.id === systemId) || SYSTEMS[0];
@@ -328,9 +382,11 @@ export default function App() {
   const takesBaseColor = system.coats.includes("POLYUREA") || system.coats.includes("FC1150");
   const flakeType = FLAKE_TYPES.find((t) => t.id === flakeTypeId) || FLAKE_TYPES[0];
   const sf = safeNumber(squareFeet || 0);
+  // verticals and stairs add sq ft to every coat; an extra topcoat adds that product over the whole area
+  const coatedSf = sf > 0 ? sf + addonSqft(addons).total : 0;
   const lines = useMemo(
-    () => buildMaterialLines(system, { baseColorId, flakeTypeId, flakeColor }, sf),
-    [system, baseColorId, flakeTypeId, flakeColor, sf]
+    () => withExtraTopcoat(buildMaterialLines(system, { baseColorId, flakeTypeId, flakeColor }, coatedSf), EXTRA_TOPCOATS[addons.extraTopcoat], coatedSf, roundUpTo, qty),
+    [system, baseColorId, flakeTypeId, flakeColor, coatedSf, addons.extraTopcoat]
   );
   const returnLines = useMemo(() => normalizeReturnLines(selectedReturnJob), [selectedReturnJob]);
   const needsReturnExplanation = mode === "RETURN" && selectedReturnJob ? returnExplanationNeeded(returnLines, lineQuantities) : false;
@@ -339,13 +395,13 @@ export default function App() {
   // loadout defaults: load the recommended quantity
   useEffect(() => {
     if (mode !== "LOADOUT") return;
-    const key = `${systemId}|${baseColorId}|${flakeTypeId}|${flakeColor}|${sf}`;
+    const key = `${systemId}|${baseColorId}|${flakeTypeId}|${flakeColor}|${coatedSf}|${addons.extraTopcoat}`;
     if (key === lastDefaultsKey.current) return;
     lastDefaultsKey.current = key;
     const defaults = {};
     lines.forEach((line) => { defaults[line.lineKey] = line.recommendedLoad; });
     setLineQuantities(defaults);
-  }, [mode, systemId, baseColorId, flakeTypeId, flakeColor, sf, lines]);
+  }, [mode, systemId, baseColorId, flakeTypeId, flakeColor, coatedSf, addons.extraTopcoat, lines]);
 
   // crew roster (names exactly as in Gusto)
   useEffect(() => {
@@ -394,6 +450,9 @@ export default function App() {
       if (fc) { setFlakeTypeId(fc.typeId); setFlakeColor(fc.color); }
       const base = BASE_COLORS.find((b) => b.label.toLowerCase() === String(match.baseCoat || "").toLowerCase());
       if (base) setBaseColorId(base.id);
+      const a = addonsFromNotes(match.crewNotes);
+      setAddons(a.addons);
+      setAddonNote(a.note);
     }
   }
 
@@ -429,6 +488,8 @@ export default function App() {
     setSelectedReturnJob(null);
     setSelectedScheduledJob(null);
     setWorkingSolo(false);
+    setAddons(EMPTY_ADDONS);
+    setAddonNote("");
     lastDefaultsKey.current = "";
   }
 
@@ -504,6 +565,8 @@ export default function App() {
       flakeId: isReturn ? (selectedReturnJob.flakeId || "") : (hasFlake ? flakeType.id : ""),
       signature: signature.trim(),
       notes: notes.trim(),
+      addons: isReturn ? "" : addonSummary(addons),
+      coatedSquareFeet: isReturn ? "" : coatedSf,
       lines: submissionLines.map((line) => ({
         materialId: line.materialId,
         materialName: line.materialName,
@@ -627,6 +690,8 @@ export default function App() {
                 <div className="sfUnit">{Number(selectedScheduledJob?.soldSquareFeet) >= 50 ? `Sold: ${Math.round(Number(selectedScheduledJob.soldSquareFeet))} sq ft (filled in from the job; change it if the job is different)` : "Square feet (from the work order)"}</div>
               </div>
 
+              <AddonsFields value={addons} onChange={setAddons} note={addonNote} floorSf={sf} />
+
               {sf > 0 ? (
                 <section className="results">
                   <div className="resultsLabel">Use vs. load on trailer</div>
@@ -746,6 +811,9 @@ select:focus, .textInput:focus, .notes:focus { border-color: ${PRIMARY}; }
 .qtyInputLabel { color: #777; font-size: 13px; font-weight: 700; }
 .qtyInput { width: 100%; border: 2px solid #ddd; border-radius: 10px; padding: 10px; text-align: center; font-family: 'Barlow Condensed', sans-serif; font-size: 24px; font-weight: 900; }
 .qtyUnit { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 800; color: #777; text-transform: uppercase; }
+.addonGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.miniLabel { font-size: 12px; font-weight: 600; color: #666; margin-bottom: 4px; }
+.addonNote { background: #fef3c7; color: #92400e; border-radius: 8px; padding: 8px 10px; font-size: 13px; margin-bottom: 8px; line-height: 1.35; }
 .emptyBox { background: #fff; border: 2px dashed #ddd; color: #aaa; border-radius: 14px; padding: 28px 16px; text-align: center; margin-bottom: 16px; font-weight: 700; }
 .returnSummary { background: #fff; border: 1px solid #ddd; border-radius: 14px; padding: 13px 14px; margin-bottom: 14px; }
 .returnSummaryTitle { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 900; letter-spacing: 1px; text-transform: uppercase; color: ${DARK}; margin-bottom: 6px; }
