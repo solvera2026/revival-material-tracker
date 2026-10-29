@@ -20,6 +20,7 @@ const CONFIG = {
   // Weekday mornings: jobs from the last work day with no Load trailer, and finished jobs with no Return
   dailyCheckHour: 7,
   signoffsFrom: "2026-11-02",   // go-live: jobs starting before this date are never flagged
+  reportsFrom: "2026-11-03",     // first morning a report can post (Slack, or email when no webhook is set)
   dailyCheckTo: "josh@revivalconcretecoatings.com,luke@revivalconcretecoatings.com,hello@revivalconcretecoatings.com,bryce@revivalconcretecoatings.com",
 };
 
@@ -610,6 +611,7 @@ function dailyMissingSignoffs() {
     if (c.ret.length) bits.push("no return: " + c.ret.join(", "));
     return { crew: k, text: bits.join("; ") };
   });
+  if (unmatched.length) crewLines.push({ crew: "Open loadouts not on the schedule", text: unmatched.map(o => (o.jobName || o.jobId) + " (loaded " + o.workDate + " by " + (o.crewLead || "?") + ")").join(", ") });
   const html = `<div style="font-family:Arial,sans-serif;"><h2>Material Tracker: missing sign-offs</h2>` +
     (crewLines.length ? `<h3>By crew</h3><ul>` + crewLines.map(l => `<li><strong>${escapeHtml_(l.crew)}</strong>: ${escapeHtml_(l.text)}</li>`).join("") + `</ul>` : "") +
     section("No Load trailer sign-off", noLoadout) +
@@ -625,8 +627,31 @@ function dailyMissingSignoffs() {
   ].filter(Boolean).join("\n");
   const count = noLoadout.length + noReturn.length + unmatched.length;
   const crewNames = Object.keys(byCrew).map(k => k.replace(/\s*\(.*\)$/, "")).filter((v, i, a) => a.indexOf(v) === i);
-  MailApp.sendEmail({ to: CONFIG.dailyCheckTo, subject: `Material Tracker: ${count} missing sign-off${count === 1 ? "" : "s"}${crewNames.length ? " - " + crewNames.join(", ") : ""} (${formatKey_(today)})`, body: plain, htmlBody: html });
+  const subject = `Material Tracker: ${count} missing sign-off${count === 1 ? "" : "s"}${crewNames.length ? " - " + crewNames.join(", ") : ""} (${formatKey_(today)})`;
+  sendSignoffReport_(subject, crewLines, html, plain);
   return { ok: true, sent: true, noLoadout: noLoadout.length, noReturn: noReturn.length, unmatched: unmatched.length };
+}
+
+/**
+ * Posts the missing sign-off report to Slack when the SLACK_WEBHOOK_URL script property is set (Project Settings > Script
+ * Properties), otherwise emails it to CONFIG.dailyCheckTo. Nothing is sent before CONFIG.reportsFrom.
+ */
+function sendSignoffReport_(subject, crewLines, html, plain) {
+  if (Utilities.formatDate(new Date(), CONFIG.dailyCheckTimezone || CONFIG.timezone, "yyyy-MM-dd") < CONFIG.reportsFrom) return;
+  const hook = PropertiesService.getScriptProperties().getProperty("SLACK_WEBHOOK_URL");
+  if (!hook) { MailApp.sendEmail({ to: CONFIG.dailyCheckTo, subject: subject, body: plain, htmlBody: html }); return; }
+  const esc = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const text = "*" + esc(subject) + "*\n" + crewLines.map(l => "• *" + esc(l.crew) + "*: " + esc(l.text)).join("\n") +
+    "\n_Crew leads can still sign late: open the material app, pick the job and submit._";
+  const res = UrlFetchApp.fetch(hook, { method: "post", contentType: "application/json", payload: JSON.stringify({ text: text }), muteHttpExceptions: true });
+  if (res.getResponseCode() >= 300) MailApp.sendEmail({ to: CONFIG.dailyCheckTo, subject: subject + " (Slack post failed)", body: plain, htmlBody: html });
+}
+
+/** Run once from the editor after adding SLACK_WEBHOOK_URL: posts a test line to the channel. */
+function testSlackPost() {
+  const hook = PropertiesService.getScriptProperties().getProperty("SLACK_WEBHOOK_URL");
+  if (!hook) throw new Error("Add the SLACK_WEBHOOK_URL script property first (Project Settings > Script Properties).");
+  UrlFetchApp.fetch(hook, { method: "post", contentType: "application/json", payload: JSON.stringify({ text: "Material Tracker is connected. Missing loadouts and returns will post here weekday mornings at 7." }) });
 }
 
 function formatKey_(key) {
