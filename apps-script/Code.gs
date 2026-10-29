@@ -599,19 +599,33 @@ function dailyMissingSignoffs() {
     ? `<h3>${title} (${rows.length})</h3><table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;"><tr style="background:#1a1a1a;color:#fff;"><th>Customer</th><th>Scheduled</th><th>Crew</th></tr>` +
       rows.map(j => `<tr><td>${escapeHtml_(j.customer)}</td><td>${dates(j)}</td><td>${escapeHtml_(who(j))}</td></tr>`).join("") + "</table>"
     : "";
+  // which crews missed what (the top of the email and the subject line)
+  const byCrew = {};
+  const crewKey = j => (j.crew || "No crew assigned") + (j.lead ? " (" + j.lead + ")" : "");
+  noLoadout.forEach(j => { const c = byCrew[crewKey(j)] = byCrew[crewKey(j)] || { load: [], ret: [] }; c.load.push(j.customer); });
+  noReturn.forEach(j => { const c = byCrew[crewKey(j)] = byCrew[crewKey(j)] || { load: [], ret: [] }; c.ret.push(j.customer); });
+  const crewLines = Object.keys(byCrew).sort().map(k => {
+    const c = byCrew[k], bits = [];
+    if (c.load.length) bits.push("no loadout: " + c.load.join(", "));
+    if (c.ret.length) bits.push("no return: " + c.ret.join(", "));
+    return { crew: k, text: bits.join("; ") };
+  });
   const html = `<div style="font-family:Arial,sans-serif;"><h2>Material Tracker: missing sign-offs</h2>` +
+    (crewLines.length ? `<h3>By crew</h3><ul>` + crewLines.map(l => `<li><strong>${escapeHtml_(l.crew)}</strong>: ${escapeHtml_(l.text)}</li>`).join("") + `</ul>` : "") +
     section("No Load trailer sign-off", noLoadout) +
     section("Job finished, no Return materials sign-off", noReturn) +
     (unmatched.length ? `<h3>Loaded more than 3 days ago with no return, not on the schedule (${unmatched.length})</h3><ul>` +
       unmatched.map(o => `<li>${escapeHtml_(o.jobName || o.jobId)}: loaded ${escapeHtml_(o.workDate)} by ${escapeHtml_(o.crewLead || "?")}</li>`).join("") + "</ul>" : "") +
     `<p>Crew leads can still sign late: open the app, pick the job and submit. Multi-day jobs aren't flagged for a return until their last scheduled day has passed.</p></div>`;
   const plain = [
+    crewLines.length ? "By crew:\n" + crewLines.map(l => `- ${l.crew}: ${l.text}`).join("\n") : "",
     noLoadout.length ? "No Load trailer: " + noLoadout.map(j => `${j.customer} (${who(j)})`).join("; ") : "",
     noReturn.length ? "No Return: " + noReturn.map(j => `${j.customer} (${who(j)})`).join("; ") : "",
     unmatched.length ? "Open loadouts not on the schedule: " + unmatched.map(o => o.jobName || o.jobId).join("; ") : "",
   ].filter(Boolean).join("\n");
   const count = noLoadout.length + noReturn.length + unmatched.length;
-  MailApp.sendEmail({ to: CONFIG.dailyCheckTo, subject: `Material Tracker: ${count} missing sign-off${count === 1 ? "" : "s"} (${formatKey_(today)})`, body: plain, htmlBody: html });
+  const crewNames = Object.keys(byCrew).map(k => k.replace(/\s*\(.*\)$/, "")).filter((v, i, a) => a.indexOf(v) === i);
+  MailApp.sendEmail({ to: CONFIG.dailyCheckTo, subject: `Material Tracker: ${count} missing sign-off${count === 1 ? "" : "s"}${crewNames.length ? " - " + crewNames.join(", ") : ""} (${formatKey_(today)})`, body: plain, htmlBody: html });
   return { ok: true, sent: true, noLoadout: noLoadout.length, noReturn: noReturn.length, unmatched: unmatched.length };
 }
 
