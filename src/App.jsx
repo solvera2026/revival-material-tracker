@@ -39,10 +39,11 @@ const BASE_FOR_FLAKE = {
   // Classic
   Wombat: "GRAY", Domino: "GRAY", "Stoney Creek": "GRAY", "Tidal Wave": "GRAY", Nightfall: "GRAY", Gravel: "GRAY", Keystone: "GRAY",
   "Silver Creek": "GRAY", Coyote: "GRAY", Orbit: "GRAY", Basalt: "GRAY", "Lanai Gray": "GRAY", Garnet: "GRAY",
-  Shoreline: "TAN",
+  Shoreline: "TAN", Chestnut: "TAN", Outback: "TAN",
+  Carbon: "BLACK",
   Creekbed: "BLENDED", "Mt. Everest": "BLENDED", "Cabin Fever": "BLENDED", Antler: "BLENDED",
   // Natural Stone
-  Shale: "GRAY", Slate: "GRAY", Turquoise: "GRAY", Claystone: "TAN",
+  Shale: "GRAY", Slate: "GRAY", Turquoise: "GRAY", Husky: "GRAY", Anchorage: "GRAY", Claystone: "TAN", Armadillo: "TAN",
 };
 
 const FLAKE_TYPES = [
@@ -52,7 +53,7 @@ const FLAKE_TYPES = [
 ];
 
 // Colors from the Revival "2026 Flake & Chemical Sheet DSM" (On Hand - Flakes)
-const CLASSIC_COLORS = ["Antler", "Basalt", "Cabin Fever", "Chestnut", "Coyote", "Creekbed", "Domino", "Granite", "Gravel", "Keystone", "Lanai Gray", "Mt. Everest", "Nightfall", "Orbit", "Outback", "Shoreline", "Silver Creek", "Stoney Creek", "Tidal Wave", "Wombat"];
+const CLASSIC_COLORS = ["Antler", "Basalt", "Cabin Fever", "Carbon", "Chestnut", "Coyote", "Creekbed", "Domino", "Garnet", "Granite", "Gravel", "Keystone", "Lanai Gray", "Mt. Everest", "Nightfall", "Orbit", "Outback", "Shoreline", "Silver Creek", "Stoney Creek", "Tidal Wave", "Wombat"];
 const NATURAL_STONE_COLORS = ["Anchorage", "Armadillo", "Claystone", "Husky", "Shale", "Slate", "Turquoise"];
 // Torginol (manufacturer) names, for ordering. The key stays the material ID so inventory history doesn't change.
 const TORGINOL_NAMES = { "Mt. Everest": "Mount Everest Match", "Silver Creek": "Silvercreek Match", "Stoney Creek": "Stony Creek" };
@@ -167,7 +168,8 @@ function buildMaterialLines(system, opts, squareFeet) {
     const m = MATERIALS[key];
     const gallons = gallonsByKey[key];
     const takesColor = key === "POLYUREA" || key === "FC1150";
-    // a blended base is two inventory items, each with its share of the gallons; safety stays on the first one
+    // a blended base is two inventory items. It's mixed 1 Gray : 1 Tan : 1 activator (part B), so each color line carries
+    // half the mixed gallons (its part A plus half the activator) and half the safety margin.
     const shares = !takesColor ? [[null, null, 1]] : baseColor.parts || [[baseColor.id, baseColor.label, 1]];
     shares.forEach(([colorId, colorName, share], i) => {
       const g = gallons * share;
@@ -175,10 +177,13 @@ function buildMaterialLines(system, opts, squareFeet) {
       const materialName = takesColor ? `${m.name} - ${colorName}` : m.name;
       const lineKey = i === 0 ? key : `${key}_${colorId}`;
       const parts = splitRatio(g, m.ratio);
-      const ab = parts.partB > 0 ? `${qty(parts.partA)} gal A + ${qty(parts.partB)} gal B` : `${qty(g)} gal`;
+      const blended = shares.length > 1 && m.ratio === "2:1";
+      const ab = blended ? `This line: ${qty(gallons / 3)} gal ${colorName} + ${qty(gallons / 6)} gal activator`
+        : parts.partB > 0 ? `${qty(parts.partA)} gal A + ${qty(parts.partB)} gal B` : `${qty(g)} gal`;
       const coatsNote = key === "POLYASPARTIC" && coatsOfPoly > 1 ? ` (${coatsOfPoly} coats)` : "";
-      const blendNote = shares.length > 1 ? `; ${Math.round(share * 100)}% of the blended base` : baseColor.id === "BLACK" && takesColor ? "; add black tint" : "";
-      const safety = i === 0 ? m.safety : 0;
+      const blendNote = blended ? `. Whole blend, 1:1:1: ${qty(gallons / 3)} gal Gray + ${qty(gallons / 3)} gal Tan + ${qty(gallons / 3)} gal activator`
+        : shares.length > 1 ? `; ${Math.round(share * 100)}% of the blended base` : baseColor.id === "BLACK" && takesColor ? "; add black tint" : "";
+      const safety = shares.length > 1 ? (m.unit === "kit" ? Math.ceil(m.safety * share - 1e-9) : roundUpTo(m.safety * share, m.step)) : m.safety;
       if (m.unit === "kit") {
         const expectedKits = Math.ceil(g / m.kitGallons - 1e-9);
         lines.push({
