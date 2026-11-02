@@ -24,11 +24,26 @@ const MATERIALS = {
 };
 
 // Polyurea and 1150FC come in Gray, Tan and Clear; each color is its own inventory item.
+// Blended is half Gray and half Tan, so it loads (and comes off inventory) as two lines.
+// Black is Clear with black tint, so it comes off inventory as Clear.
 const BASE_COLORS = [
   { id: "GRAY", label: "Gray" },
   { id: "TAN", label: "Tan" },
+  { id: "BLENDED", label: "Blended (half Gray, half Tan)", parts: [["GRAY", "Gray", 0.5], ["TAN", "Tan", 0.5]] },
+  { id: "BLACK", label: "Black (Clear + black tint)", parts: [["CLEAR", "Clear (black tint)", 1]] },
   { id: "CLEAR", label: "Clear" },
 ];
+
+// Revival base coat key: which base goes under each flake color. The crew can still change it.
+const BASE_FOR_FLAKE = {
+  // Classic
+  Wombat: "GRAY", Domino: "GRAY", "Stoney Creek": "GRAY", "Tidal Wave": "GRAY", Nightfall: "GRAY", Gravel: "GRAY", Keystone: "GRAY",
+  "Silver Creek": "GRAY", Coyote: "GRAY", Orbit: "GRAY", Basalt: "GRAY", "Lanai Gray": "GRAY", Garnet: "GRAY",
+  Shoreline: "TAN",
+  Creekbed: "BLENDED", "Mt. Everest": "BLENDED", "Cabin Fever": "BLENDED", Antler: "BLENDED",
+  // Natural Stone
+  Shale: "GRAY", Slate: "GRAY", Turquoise: "GRAY", Claystone: "TAN",
+};
 
 const FLAKE_TYPES = [
   { id: "CLASSIC", label: 'Classic 1/4" Flake', coverage: 250, hasColor: true },
@@ -152,26 +167,34 @@ function buildMaterialLines(system, opts, squareFeet) {
     const m = MATERIALS[key];
     const gallons = gallonsByKey[key];
     const takesColor = key === "POLYUREA" || key === "FC1150";
-    const materialId = takesColor ? `${key}_${baseColor.id}` : (m.id || key);
-    const materialName = takesColor ? `${m.name} - ${baseColor.label}` : m.name;
-    const parts = splitRatio(gallons, m.ratio);
-    const ab = parts.partB > 0 ? `${qty(parts.partA)} gal A + ${qty(parts.partB)} gal B` : `${qty(gallons)} gal`;
-    const coatsNote = key === "POLYASPARTIC" && coatsOfPoly > 1 ? ` (${coatsOfPoly} coats)` : "";
-    if (m.unit === "kit") {
-      const expectedKits = Math.ceil(gallons / m.kitGallons - 1e-9);
-      lines.push({
-        lineKey: key, category: m.category, materialId, materialName, unit: "kit", step: 1, color: m.color,
-        expectedUse: expectedKits, safetyQty: m.safety, recommendedLoad: expectedKits + m.safety,
-        detail: `${ab} mixed, ${m.kitGallons}-gal kits (${qty(m.coverage * m.kitGallons)} SF/kit at ${m.coverage} SF/gal)`,
-      });
-    } else {
-      const expected = roundUpTo(gallons, m.step);
-      lines.push({
-        lineKey: key, category: coatsNote ? "Base + Topcoat" : m.category, materialId, materialName: materialName + coatsNote, unit: "gal", step: m.step, color: m.color,
-        expectedUse: expected, safetyQty: m.safety, recommendedLoad: roundUpTo(expected + m.safety, m.step),
-        detail: `${ab} at ${m.coverage} SF/gal${coatsNote}, ${m.kitGallons}-gal kits`,
-      });
-    }
+    // a blended base is two inventory items, each with its share of the gallons; safety stays on the first one
+    const shares = !takesColor ? [[null, null, 1]] : baseColor.parts || [[baseColor.id, baseColor.label, 1]];
+    shares.forEach(([colorId, colorName, share], i) => {
+      const g = gallons * share;
+      const materialId = takesColor ? `${key}_${colorId}` : (m.id || key);
+      const materialName = takesColor ? `${m.name} - ${colorName}` : m.name;
+      const lineKey = i === 0 ? key : `${key}_${colorId}`;
+      const parts = splitRatio(g, m.ratio);
+      const ab = parts.partB > 0 ? `${qty(parts.partA)} gal A + ${qty(parts.partB)} gal B` : `${qty(g)} gal`;
+      const coatsNote = key === "POLYASPARTIC" && coatsOfPoly > 1 ? ` (${coatsOfPoly} coats)` : "";
+      const blendNote = shares.length > 1 ? `; ${Math.round(share * 100)}% of the blended base` : baseColor.id === "BLACK" && takesColor ? "; add black tint" : "";
+      const safety = i === 0 ? m.safety : 0;
+      if (m.unit === "kit") {
+        const expectedKits = Math.ceil(g / m.kitGallons - 1e-9);
+        lines.push({
+          lineKey, category: m.category, materialId, materialName, unit: "kit", step: 1, color: m.color,
+          expectedUse: expectedKits, safetyQty: safety, recommendedLoad: expectedKits + safety,
+          detail: `${ab} mixed, ${m.kitGallons}-gal kits (${qty(m.coverage * m.kitGallons)} SF/kit at ${m.coverage} SF/gal)${blendNote}`,
+        });
+      } else {
+        const expected = roundUpTo(g, m.step);
+        lines.push({
+          lineKey, category: coatsNote ? "Base + Topcoat" : m.category, materialId, materialName: materialName + coatsNote, unit: "gal", step: m.step, color: m.color,
+          expectedUse: expected, safetyQty: safety, recommendedLoad: roundUpTo(expected + safety, m.step),
+          detail: `${ab} at ${m.coverage} SF/gal${coatsNote}, ${m.kitGallons}-gal kits${blendNote}`,
+        });
+      }
+    });
   }
   return lines;
 }
@@ -353,7 +376,7 @@ function ReturnMaterialCard({ line, value, onChange }) {
 export default function App() {
   const [mode, setMode] = useState("LOADOUT");
   const [systemId, setSystemId] = useState(SYSTEMS[0].id);
-  const [baseColorId, setBaseColorId] = useState("GRAY");
+  const [baseColorId, setBaseColorId] = useState(BASE_FOR_FLAKE[CLASSIC_COLORS[0]] || "GRAY");
   const [flakeTypeId, setFlakeTypeId] = useState("CLASSIC");
   const [flakeColor, setFlakeColor] = useState(CLASSIC_COLORS[0]);
   const [squareFeet, setSquareFeet] = useState("");
@@ -447,8 +470,9 @@ export default function App() {
       // Under 50 sq ft is a placeholder (minimum-price jobs), so the crew enters it.
       if (Number(match.soldSquareFeet) >= 50) setSquareFeet(String(Math.round(Number(match.soldSquareFeet))));
       const fc = findFlakeColor(match.flakeColor);
-      if (fc) { setFlakeTypeId(fc.typeId); setFlakeColor(fc.color); }
-      const base = BASE_COLORS.find((b) => b.label.toLowerCase() === String(match.baseCoat || "").toLowerCase());
+      if (fc) { setFlakeTypeId(fc.typeId); setFlakeColor(fc.color); if (BASE_FOR_FLAKE[fc.color]) setBaseColorId(BASE_FOR_FLAKE[fc.color]); }
+      const wo = String(match.baseCoat || "").toLowerCase().trim();
+      const base = wo && BASE_COLORS.find((b) => b.id.toLowerCase() === wo || b.label.toLowerCase() === wo || b.label.toLowerCase().startsWith(wo + " "));
       if (base) setBaseColorId(base.id);
       const a = addonsFromNotes(match.crewNotes);
       setAddons(a.addons);
@@ -459,7 +483,12 @@ export default function App() {
   function chooseFlakeType(id) {
     setFlakeTypeId(id);
     const colors = flakeColorsFor(id);
-    if (colors.length && !colors.includes(flakeColor)) setFlakeColor(colors[0]);
+    if (colors.length && !colors.includes(flakeColor)) chooseFlakeColor(colors[0]);
+  }
+
+  function chooseFlakeColor(color) {
+    setFlakeColor(color);
+    if (BASE_FOR_FLAKE[color]) setBaseColorId(BASE_FOR_FLAKE[color]);
   }
 
   function chooseSolo() {
@@ -666,9 +695,21 @@ export default function App() {
               </SelectField>
 
               {takesBaseColor && (
-                <SelectField label="Base color" value={baseColorId} onChange={setBaseColorId}>
-                  {BASE_COLORS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                </SelectField>
+                <div>
+                  <SelectField label="Base color" value={baseColorId} onChange={setBaseColorId}>
+                    {BASE_COLORS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </SelectField>
+                  {hasFlake && flakeType.hasColor && !BASE_FOR_FLAKE[flakeColor] && (
+                    <div className="fieldHint baseKeyHint">{flakeColor === OTHER_COLOR ? "Pick the base coat from the work order." : `${colorLabel(flakeColor)} isn't on the base coat key. Check the work order for the base color.`}</div>
+                  )}
+                  {hasFlake && flakeType.hasColor && BASE_FOR_FLAKE[flakeColor] && (
+                    <div className="fieldHint baseKeyHint">
+                      {BASE_FOR_FLAKE[flakeColor] === baseColorId
+                        ? `Base coat key: ${colorLabel(flakeColor)} goes on ${BASE_COLORS.find((b) => b.id === baseColorId).label}.`
+                        : `Base coat key says ${BASE_COLORS.find((b) => b.id === BASE_FOR_FLAKE[flakeColor]).label} for ${colorLabel(flakeColor)}. Only change it if the work order says so.`}
+                    </div>
+                  )}
+                </div>
               )}
 
               {hasFlake && (
@@ -677,7 +718,7 @@ export default function App() {
                     {FLAKE_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label} - {item.coverage} SF/box</option>)}
                   </SelectField>
                   {flakeType.hasColor && (
-                    <SelectField label="Flake color" value={flakeColor} onChange={setFlakeColor}>
+                    <SelectField label="Flake color" value={flakeColor} onChange={chooseFlakeColor}>
                       {[...flakeColorsFor(flakeTypeId), OTHER_COLOR].map((c) => <option key={c} value={c}>{colorLabel(c)}</option>)}
                     </SelectField>
                   )}
@@ -777,6 +818,7 @@ h1 { font-family: 'Barlow Condensed', sans-serif; font-size: 30px; line-height: 
 .field { margin-bottom: 14px; }
 .label { display: block; font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #888; margin-bottom: 6px; }
 .fieldHint { color: #888; font-size: 12px; margin-top: 6px; line-height: 1.35; }
+.baseKeyHint { margin-top: -8px; margin-bottom: 14px; }
 .jobMatch { color: ${GREEN}; font-weight: 700; margin-top: -8px; margin-bottom: 14px; }
 .jobNoMatch { color: #b45309; font-weight: 700; margin-top: -8px; margin-bottom: 14px; }
 .selectWrap { position: relative; }
