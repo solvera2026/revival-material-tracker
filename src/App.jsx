@@ -38,7 +38,7 @@ const BASE_COLORS = [
 const BASE_FOR_FLAKE = {
   // Classic
   Wombat: "GRAY", Domino: "GRAY", "Stoney Creek": "GRAY", "Tidal Wave": "GRAY", Nightfall: "GRAY", Gravel: "GRAY", Keystone: "GRAY",
-  "Silver Creek": "GRAY", Coyote: "GRAY", Orbit: "GRAY", Basalt: "GRAY", "Lanai Gray": "GRAY", Garnet: "GRAY",
+  "Silver Creek": "GRAY", Coyote: "GRAY", Orbit: "GRAY", Basalt: "GRAY", "Lanai Gray": "GRAY", Garnet: "GRAY", Granite: "GRAY",
   Shoreline: "TAN", Chestnut: "TAN", Outback: "TAN",
   Carbon: "BLACK",
   Creekbed: "BLENDED", "Mt. Everest": "BLENDED", "Cabin Fever": "BLENDED", Antler: "BLENDED",
